@@ -1,0 +1,34 @@
+{-# STDLIB_VERSION 6 #-}
+{-# CONTENT_TYPE DAPP #-}
+{-# SCRIPT_TYPE ACCOUNT #-}
+
+let mintAddress = Address(base58'3PGN5FAmTrsYAVJouKY2K6to1qhF4ecJdhV')
+let li11 = [1,2,3,4,5,6,7,8,9,10,11]
+
+@Callable(i)
+func mintMany(n: Int) = {
+  strict maxN = if n > 11 then throw("maximum of 11 mintings per time") else true
+  strict wavesBal0 = wavesBalance(this).regular
+
+  let userAddressStr = i.caller.toString()
+  let paymentSize = i.payments[0].amount / n
+
+  func callMint(accum: Int, next: Int) = {
+    if (next > n) then {
+      next
+    } else {
+      strict inv = invoke(mintAddress, "startMint", [userAddressStr], [AttachedPayment(unit, paymentSize)])
+      next + 1
+    }
+  }
+
+  strict mints = FOLD<11>(li11, 1, callMint)
+
+  strict wavesBal1 = wavesBalance(this).regular
+
+  [
+    ScriptTransfer(i.caller, i.payments[0].amount-(wavesBal0-wavesBal1), unit)
+  ]
+}
+
+ 
