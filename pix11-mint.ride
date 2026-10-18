@@ -1,0 +1,101 @@
+{-# STDLIB_VERSION 6 #-}
+{-# CONTENT_TYPE DAPP #-}
+{-# SCRIPT_TYPE ACCOUNT #-}
+
+let Scale8 = 100000000
+
+let initialPrice = getInteger("setup_initialPrice").valueOrElse(1000_0000)
+let stepPrice = getInteger("setup_stepPrice").valueOrElse(10_0000) # 0.1%
+let mintDelayBlocks = getInteger("setup_mintDelayBlocks").valueOrElse(0) # 2 blocks = 2 minutes
+
+func calcNextPrice() = {
+  let lastPrice = getInteger("setup_lastPrice").valueOrElse(initialPrice)
+  fraction(lastPrice, Scale8+stepPrice, Scale8)
+}
+
+func randNum(mintId: String, blockNum: Int, max: Int) = {
+  let bytes = blockInfoByHeight(blockNum).value().vrf.value()
+  bytes.toInt() % max
+}
+
+func randNum2(mintId: String, blockNum: Int, max: Int) = {
+  let bytes = blockInfoByHeight(blockNum).value().vrf.value()
+  bytes.dropRight(12).toInt() % max
+}
+
+
+@Callable(i)
+func updateStr(key: String, val: String) = {
+  # after testing whitelist to self invoke!
+  [
+    StringEntry(key, val)
+  ]
+}
+
+@Callable(i)
+func updateInt(key: String, val: Int) = {
+  # after testing whitelist to self invoke!
+  [
+    IntegerEntry(key, val)
+  ]
+}
+
+@Callable(i)
+func startMint(mintOwner: String) = {
+  let price = calcNextPrice()
+  let pmt = i.payments[0]
+
+  strict pmtAsset = (if pmt.assetId == unit then unit else throw("wrong asset attached"))
+  strict cashback = (if pmt.amount >= price then pmt.amount - price else throw("not enough payment attached"))
+
+  let mintId = i.transactionId.toBase58String() + price.toString()
+  let userAddressStr = if mintOwner == "" then i.caller.toString() else mintOwner
+
+  ([
+    IntegerEntry("mint_"+mintId+"_startedAt", height),
+    IntegerEntry("mint_"+mintId+"_status", 1),
+    StringEntry("user_"+userAddressStr+"_activeMints", getString("user_"+userAddressStr+"_activeMints").valueOrElse("")+mintId+","),
+    StringEntry("mint_"+mintId+"_owner", userAddressStr),
+    IntegerEntry("setup_lastPrice", price),
+    ScriptTransfer(i.caller, cashback, pmtAsset)
+  ], mintId)
+}
+
+@Callable(i)
+func endMint(mintId: String) = {
+  let callerStr = i.caller.toString()
+  let startedAt = getInteger("mint_"+mintId+"_startedAt").valueOrErrorMessage("cant find mint start")
+  let liPages = getInteger("setup_availableIdPages").valueOrElse(2)
+
+  strict mintUnlocked = if height - mintDelayBlocks >= startedAt then true else throw("can't end mint yet")
+  strict correctCaller = if callerStr == getString("mint_"+mintId+"_owner").valueOrErrorMessage("cant find mint owner") then true else throw("caller is not the owner of mint")
+  strict statusCheck = if getIntegerValue("mint_"+mintId+"_status") <= 1 then true else throw("was already finished")
+
+  let page = randNum2(mintId, startedAt + mintDelayBlocks, liPages).toString()
+  let availableLi = getStringValue("setup_availableIds_"+page).split_51C(",")
+  let randN = randNum(mintId, startedAt + mintDelayBlocks, availableLi.size())
+  let randId = availableLi[randN]
+  let newLi = availableLi.removeByIndex(availableLi.indexOf(randId).value()).makeString_11C(",")
+
+  let nftName = "PIX-"+randId
+  let nftDescription = "PIX11 Player #"+randId
+  let nftImageLink = "https://ff.auraproject.net/api/players/"+randId+".svg"
+  let collectionName = "PIX11"
+
+  strict createdNFTIdStr = match (invoke(Address(base58'3PFQjjDMiZKQZdu5JqTHD7HwgSXyp9Rw9By'), "createNFT", [nftName, nftDescription, nftImageLink, collectionName], [])) {
+    case x: String => x
+    case _ => throw("something went wrong during the creation of NFT")
+  }
+  let createdNFTId = createdNFTIdStr.fromBase58String()
+
+  let userMints = getString("user_"+i.caller.toString()+"_activeMints").valueOrElse("").split_51C(",").value()
+
+  ([
+    ScriptTransfer(i.caller, 1, createdNFTId),
+    StringEntry("setup_availableIds_"+page, newLi),
+    IntegerEntry("mint_"+mintId+"_status", 2),
+    StringEntry("nft_"+createdNFTIdStr+"_player", randId),
+    StringEntry("player_"+randId+"_nft", createdNFTIdStr),
+    StringEntry("user_"+i.caller.toString()+"_activeMints", userMints.removeByIndex(userMints.indexOf(mintId).value()).makeString_11C(","))
+  ], createdNFTIdStr)
+}
