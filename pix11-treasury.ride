@@ -1,0 +1,39 @@
+{-# STDLIB_VERSION 6 #-}
+{-# CONTENT_TYPE DAPP #-}
+{-# SCRIPT_TYPE ACCOUNT #-}
+
+let mintAddress = Address(base58'3PGN5FAmTrsYAVJouKY2K6to1qhF4ecJdhV')
+
+let MaxBurnPer1000B = 1000_00000000
+let BurnPenalty = 50000000
+
+func calcBurnValue(nftIdStr: String) = {
+  # TODO
+  1000
+}
+
+@Callable(i)
+func stake() = {
+  strict inv = invoke(Address(base58''), "mintLP", [], i.payments)
+
+  []
+}
+
+@Callable(i)
+func burnNFT() = {
+  let tokenId = i.payments[0].value().assetId.value()
+  let tokenIdStr = tokenId.toBase58String()
+
+  strict playerId = getString(mintAddress, "nft_"+tokenIdStr+"_player").valueOrErrorMessage("not valid NFT")
+
+  let burnForValue = calcBurnValue(tokenIdStr)
+
+  [
+    Burn(tokenId, 1),
+    # ScriptTransfer(i.caller, burnForValue, unit),
+    IntegerEntry("nft_"+tokenIdStr+"_burned", 1),
+    IntegerEntry("player_"+tokenIdStr+"_burned", 1)
+  ]
+}
+
+        
